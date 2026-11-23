@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multicon Hotspot 2 (MikroTik) - Cloud POS</title>
+  <style>
+    :root {
+      --primary: #0f172a;
+      --accent: #0d9488;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: #1e293b; }
+    .container { max-width: 820px; margin: 0 auto; }
+    header {
+      background: var(--primary); color: #fff; padding: 16px 20px;
+      border-radius: 12px; margin-bottom: 14px;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.2rem; }
+    header small { color: #94a3b8; }
+    .nav-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .tab-btn {
+      flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #cbd5e1;
+      background: #fff; color: var(--primary); font-weight: 700; cursor: pointer;
+    }
+    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .card {
+      background: var(--card); border-radius: 12px; padding: 16px;
+      margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card h2 { margin: 0 0 12px 0; font-size: 1rem; color: var(--primary); }
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-box {
+      background: var(--card); padding: 14px; border-radius: 12px;
+      text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .stat-box .val { font-size: 1.35rem; font-weight: 700; color: var(--primary); }
+    .stat-box .lbl { font-size: 0.78rem; color: #64748b; margin-top: 4px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    input, select, textarea, button {
+      padding: 10px 12px; border-radius: 8px; border: 1px solid #cbd5e1;
+      font-size: 0.95rem;
+    }
+    input, select, textarea { flex: 1; min-width: 140px; }
+    button { cursor: pointer; border: none; font-weight: 600; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; width: 100%; padding: 14px; font-size: 1.05rem; }
+    .btn-outline { background: #e2e8f0; color: #1e293b; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 5px 9px; font-size: 0.78rem; }
+    .plan-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+      gap: 10px; margin-bottom: 12px;
+    }
+    .plan-btn {
+      background: #f8fafc; border: 2px solid #cbd5e1; color: #0f172a;
+      padding: 12px; border-radius: 10px; text-align: left;
+    }
+    .plan-btn.active { border-color: var(--accent); background: #f0fdfa; }
+    .plan-btn .p-name { font-weight: 700; display: block; }
+    .plan-btn .p-meta { font-size: 0.8rem; color: #475569; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; }
+    .badge-avail { background: #dcfce7; color: #166534; }
+    .badge-sold { background: #fee2e2; color: #991b1b; }
+    .hidden { display: none; }
+
+    #receipt-preview {
+      font-family: "Courier New", Courier, monospace;
+      width: 240px; margin: 0 auto; background: #fff;
+      border: 1px dashed #94a3b8; padding: 12px;
+      white-space: pre-wrap; font-size: 12px; line-height: 1.35; color: #000;
+    }
+    @media print {
+      body * { visibility: hidden; }
+      #receipt-preview, #receipt-preview * { visibility: visible; }
+      #receipt-preview {
+        position: fixed; left: 0; top: 0; width: 58mm;
+        border: none; padding: 0; margin: 0; font-size: 11pt;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>MULTICON HOTSPOT 2</h1>
+      <small id="sync-status">Cloud Sync: Connecting...</small>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-outline" onclick="refreshAll()">Refresh</button>
+      <button class="btn-outline" onclick="exportTodaySalesCSV()">Export Today</button>
+    </div>
+  </header>
+
+  <div class="nav-tabs">
+    <button id="tab-agent" class="tab-btn active" onclick="switchTab('agent')">Agent POS (Sell & Print)</button>
+    <button id="tab-admin" class="tab-btn" onclick="switchTab('admin')">Owner Dashboard (Upload & Monitor)</button>
+  </div>
+
+  <!-- AGENT VIEW -->
+  <div id="view-agent">
+    <div class="stats">
+      <div class="stat-box">
+        <div class="val" id="agent-avail">0</div>
+        <div class="lbl">Available Stock</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="agent-today-count">0</div>
+        <div class="lbl">Sold Today (All Agents)</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Sell & Print Next MikroTik Voucher</h2>
+      <div id="plan-buttons" class="plan-grid"></div>
+      <div class="row">
+        <input type="text" id="customer-name" placeholder="Customer Name or Phone (recommended for queries)" />
+      </div>
+      <div class="row">
+        <select id="agent-select">
+          <option value="Agent 1">Agent 1</option>
+          <option value="Agent 2">Agent 2</option>
+          <option value="Counter">Counter</option>
+        </select>
+        <input type="text" id="agent-custom-name" placeholder="Or type custom agent name" />
+        <select id="print-mode">
+          <option value="rawbt">Android Bluetooth (RawBT)</option>
+          <option value="browser">System Print (58mm)</option>
+        </select>
+      </div>
+      <button id="sell-btn" class="btn-success" onclick="sellAndPrint()">SELL & PRINT VOUCHER</button>
+    </div>
+
+    <div class="card">
+      <h2>Last Printed Slip (58mm Preview)</h2>
+      <div id="receipt-preview">No voucher sold yet.</div>
+      <div class="row" style="margin-top:10px; justify-content:center;">
+        <button class="btn-outline" onclick="reprintLast()">Reprint Last Slip</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- OWNER / ADMIN DASHBOARD VIEW -->
+  <div id="view-admin" class="hidden">
+    <div class="stats">
+      <div class="stat-box">
+        <div class="val" id="adm-today-sales">0</div>
+        <div class="lbl">Tokens Sold Today</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="adm-today-rev">$0.00</div>
+        <div class="lbl">Today's Revenue</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="adm-avail-stock">0</div>
+        <div class="lbl">Unsold Tokens Left</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Customer & Token Query Lookup</h2>
+      <div class="row">
+        <input type="text" id="search-query" placeholder="Type customer name, phone, voucher code, or agent..." oninput="render()" />
+        <button class="btn-outline" onclick="document.getElementById('search-query').value=''; render();">Clear</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Code</th>
+              <th>Package</th>
+              <th>Status</th>
+              <th>Sold Info</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="admin-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Per-Agent Performance (Today)</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Tokens Sold Today</th>
+              <th>Revenue Today</th>
+            </tr>
+          </thead>
+          <tbody id="agent-summary-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Upload MikroTik Vouchers</h2>
+      <div class="row">
+        <input type="text" id="import-plan" placeholder="Package (e.g. 24 Hours / 1 Week)" value="24 Hours" />
+        <input type="number" id="import-price" placeholder="Price ($)" step="0.01" value="0.50" />
+      </div>
+      <div class="row">
+        <input type="file" id="csv-file" accept=".csv,.txt" />
+        <button class="btn-primary" onclick="importCSVFile()">Upload CSV</button>
+      </div>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer; font-size:0.88rem; color:#475569;">Or paste voucher codes (one per line)</summary>
+        <textarea id="manual-codes" rows="4" style="width:100%; margin-top:8px;" placeholder="Paste MikroTik codes here..."></textarea>
+        <button class="btn-primary" style="margin-top:6px;" onclick="importManualCodes()">Upload Pasted Codes</button>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>Fix Price or Delete Unsold Batch</h2>
+      <div class="row">
+        <select id="edit-batch-select"></select>
+        <input type="number" id="edit-new-price" placeholder="New Price ($)" step="0.01" />
+        <button class="btn-primary" onclick="updateBatchPrice()">Update Price</button>
+        <button class="btn-danger" onclick="deleteUnsoldBatch()">Delete Unsold</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cloud Connection Settings (Supabase)</h2>
+      <div class="row">
+        <input type="text" id="sb-url" placeholder="https://xxxx.supabase.co" />
+        <input type="password" id="sb-key" placeholder="Supabase publishable / anon key" />
+        <button class="btn-primary" onclick="saveConfig()">Save & Connect</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const ADMIN_PIN = "2030"; // Change this to your Owner PIN
+  let adminUnlocked = false;
+
+  const CFG_KEY = "multicon2_supabase_cfg_v1";
+  let cfg = {
+    url: "https://kqbqzfcdbkqgkpumjerh.supabase.co",
+    key: "sb_publishable_pz_7eG5vFW2bLmFkJC9PXw__OHPKAUr"
+  };
+
+  let vouchers = [];
+  let selectedPlanKey = null;
+  let lastReceiptText = "";
+
+  document.getElementById("sb-url").value = cfg.url || "";
+  document.getElementById("sb-key").value = cfg.key || "";
+
+  function saveConfig() {
+    cfg.url = document.getElementById("sb-url").value.trim().replace(/\/+$/, "");
+    cfg.key = document.getElementById("sb-key").value.trim();
+    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+    refreshAll();
+  }
+
+  function hasConfig() {
+    return Boolean(cfg.url && cfg.key && !cfg.key.includes("PASTE_YOUR"));
+  }
+
+  async function sbRequest(path, options = {}) {
+    const res = await fetch(`${cfg.url}/rest/v1/${path}`, {
+      ...options,
+      headers: {
+        "apikey": cfg.key,
+        "Authorization": `Bearer ${cfg.key}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `HTTP ${res.status}`);
+    }
+    return res.status === 204 ? null : res.json();
+  }
+
+  async function refreshAll() {
+    const statusEl = document.getElementById("sync-status");
+    if (!hasConfig()) {
+      statusEl.textContent = "Cloud Sync: Add Supabase Key in Owner Dashboard";
+      render();
+      return;
+    }
+    try {
+      statusEl.textContent = "Cloud Sync: Syncing...";
+      vouchers = await sbRequest("mikrotik_vouchers?select=*&order=created_at.desc&limit=1000");
+      statusEl.textContent = `Cloud Sync: Connected (${new Date().toLocaleTimeString()})`;
+      render();
+    } catch (err) {
+      statusEl.textContent = "Cloud Sync: Error — check Supabase settings";
+      console.error(err);
+    }
+  }
+
+  function switchTab(tab) {
+    if (tab === "admin" && !adminUnlocked) {
+      const entered = prompt("Enter Owner PIN:");
+      if (entered !== ADMIN_PIN) {
+        alert("Incorrect PIN.");
+        return;
+      }
+      adminUnlocked = true;
+    }
+    document.getElementById("tab-agent").classList.toggle("active", tab === "agent");
+    document.getElementById("tab-admin").classList.toggle("active", tab === "admin");
+    document.getElementById("view-agent").classList.toggle("hidden", tab !== "agent");
+    document.getElementById("view-admin").classList.toggle("hidden", tab !== "admin");
+    refreshAll();
+  }
+
+  function isToday(isoStr) {
+    if (!isoStr) return false;
+    const d = new Date(isoStr);
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() &&
+           d.getMonth() === now.getMonth() &&
+           d.getDate() === now.getDate();
+  }
+
+  function formatReceipt(v) {
+    const line = "--------------------------------";
+    const dateStr = new Date(v.sold_at || Date.now()).toLocaleString();
+    return [
+      "       MULTICON HOTSPOT 2       ",
+      "       Fast & Reliable WiFi     ",
+      line,
+      v.customer_name ? `Customer: ${v.customer_name}` : null,
+      `Package : ${v.plan}`,
+      `Price   : $${Number(v.price).toFixed(2)}`,
+      `Date    : ${dateStr}`,
+      v.sold_by ? `Agent   : ${v.sold_by}` : null,
+      line,
+      "       YOUR VOUCHER CODE:       ",
+      "",
+      `          ${v.code}          `,
+      "",
+      line,
+      "How to connect:",
+      "1. Connect to Multicon Hotspot 2",
+      "2. Open browser if login page",
+      "   does not pop up automatically",
+      "3. Enter the voucher code above",
+      line,
+      "   Thank you for your business! ",
+      "   For queries contact:         ",
+      "   0771896905 / 0774317164      ",
+      "\n\n\n"
+    ].filter(Boolean).join("\n");
+  }
+
+  function sendToPrinter(receiptText) {
+    document.getElementById("receipt-preview").textContent = receiptText;
+    const mode = document.getElementById("print-mode").value;
+    if (mode === "rawbt") {
+      window.location.href = "rawbt:" + encodeURIComponent(receiptText);
+    } else {
+      window.print();
+    }
+  }
+
+  async function sellAndPrint() {
+    if (!hasConfig()) return alert("Configure Supabase in Owner Dashboard first.");
+    if (!selectedPlanKey) return alert("Select a package first.");
+
+    const [plan, priceStr] = selectedPlanKey.split("|");
+    const price = parseFloat(priceStr);
+    const customName = document.getElementById("agent-custom-name").value.trim();
+    const agentName = customName || document.getElementById("agent-select").value;
+    const customerName = document.getElementById("customer-name").value.trim();
+
+    const btn = document.getElementById("sell-btn");
+    btn.disabled = true;
+    try {
+      const claimed = await sbRequest("rpc/claim_next_mikrotik_voucher", {
+        method: "POST",
+        body: JSON.stringify({
+          p_plan: plan,
+          p_price: price,
+          p_sold_by: agentName,
+          p_customer_name: customerName || null
+        })
+      });
+      if (!claimed || !claimed.length) {
+        alert("No available tokens left for this package!");
+        return;
+      }
+      document.getElementById("customer-name").value = "";
+      const soldVoucher = claimed[0];
+      lastReceiptText = formatReceipt(soldVoucher);
+      await refreshAll();
+      sendToPrinter(lastReceiptText);
+    } catch (err) {
+      alert("Sale failed: " + err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function reprintLast() {
+    if (!lastReceiptText) {
+      const lastSold = vouchers.find(v => v.status === "sold");
+      if (!lastSold) return alert("No sold voucher to reprint.");
+      lastReceiptText = formatReceipt(lastSold);
+    }
+    sendToPrinter(lastReceiptText);
+  }
+
+  function reprintByCode(code) {
+    const v = vouchers.find(item => item.code === code);
+    if (!v) return;
+    lastReceiptText = formatReceipt(v);
+    sendToPrinter(lastReceiptText);
+  }
+
+  async function insertBatch(codes, plan, price) {
+    if (!hasConfig()) return alert("Configure Supabase in Owner Dashboard first.");
+    const existing = new Set(vouchers.map(v => v.code));
+    const uniqueNew = [...new Set(codes)].filter(c => c && !existing.has(c));
+    if (!uniqueNew.length) return alert("No new unique codes to upload.");
+
+    const rows = uniqueNew.map(code => ({
+      code,
+      plan,
+      price,
+      status: "available"
+    }));
+
+    await sbRequest("mikrotik_vouchers?on_conflict=code", {
+      method: "POST",
+      headers: { "Prefer": "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify(rows)
+    });
+    await refreshAll();
+    alert(`Uploaded ${rows.length} MikroTik vouchers to "${plan}".`);
+  }
+
+  function importCSVFile() {
+    const fileInput = document.getElementById("csv-file");
+    const file = fileInput.files[0];
+    if (!file) return alert("Choose a CSV file first.");
+    const plan = document.getElementById("import-plan").value.trim() || "Standard";
+    const price = parseFloat(document.getElementById("import-price").value) || 0;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target.result.replace(/^\uFEFF/, "");
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const codes = [];
+      lines.forEach((line, i) => {
+        const delimiter = line.includes(";") && !line.includes(",") ? ";" : ",";
+        const cols = line.split(delimiter).map(c => c.replace(/^["'\s]+|["'\s]+$/g, ""));
+        if (i === 0 && /voucher|code|username|password|profile|package|status|time/i.test(cols.join(" "))) return;
+        const candidate = cols.find(c => /^[A-Za-z0-9_-]{3,32}$/.test(c) && !/e\+/i.test(c));
+        if (candidate) codes.push(candidate);
+      });
+      fileInput.value = "";
+      if (!codes.length) {
+        return alert("No valid voucher codes found in that CSV. Tip: paste codes in 'Or paste voucher codes'.");
+      }
+      await insertBatch(codes, plan, price);
+    };
+    reader.readAsText(file);
+  }
+
+  async function importManualCodes() {
+    const raw = document.getElementById("manual-codes").value;
+    const plan = document.getElementById("import-plan").value.trim() || "Standard";
+    const price = parseFloat(document.getElementById("import-price").value) || 0;
+    const codes = raw.split(/\r?\n/).map(c => c.trim()).filter(Boolean);
+    document.getElementById("manual-codes").value = "";
+    await insertBatch(codes, plan, price);
+  }
+
+  async function updateBatchPrice() {
+    const key = document.getElementById("edit-batch-select").value;
+    const newPrice = parseFloat(document.getElementById("edit-new-price").value);
+    if (!key || isNaN(newPrice) || newPrice < 0) return alert("Select a batch and enter a valid new price.");
+
+    const [plan, oldPrice] = key.split("|");
+    await sbRequest(
+      `mikrotik_vouchers?plan=eq.${encodeURIComponent(plan)}&price=eq.${oldPrice}&status=eq.available`,
+      {
+        method: "PATCH",
+        headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify({ price: newPrice })
+      }
+    );
+    document.getElementById("edit-new-price").value = "";
+    await refreshAll();
+    alert(`Updated unsold "${plan}" vouchers to $${newPrice.toFixed(2)}.`);
+  }
+
+  async function deleteUnsoldBatch() {
+    const key = document.getElementById("edit-batch-select").value;
+    if (!key) return;
+    const [plan, oldPrice] = key.split("|");
+    if (!confirm(`Delete all UNSOLD vouchers for "${plan}" ($${Number(oldPrice).toFixed(2)})?`)) return;
+
+    await sbRequest(
+      `mikrotik_vouchers?plan=eq.${encodeURIComponent(plan)}&price=eq.${oldPrice}&status=eq.available`,
+      {
+        method: "DELETE",
+        headers: { "Prefer": "return=minimal" }
+      }
+    );
+    await refreshAll();
+    alert("Unsold batch deleted.");
+  }
+
+  function exportTodaySalesCSV() {
+    const todaySold = vouchers.filter(v => v.status === "sold" && isToday(v.sold_at));
+    if (!todaySold.length) return alert("No sales recorded today.");
+    const rows = [
+      ["Customer", "Code", "Package", "Price", "Sold By", "Sold At"],
+      ...todaySold.map(v => [v.customer_name || "", v.code, v.plan, v.price, v.sold_by || "", v.sold_at || ""])
+    ];
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `multicon2-mikrotik-sales-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  }
+
+  function render() {
+    const avail = vouchers.filter(v => v.status === "available");
+    const todaySold = vouchers.filter(v => v.status === "sold" && isToday(v.sold_at));
+    const todayRev = todaySold.reduce((sum, v) => sum + Number(v.price || 0), 0);
+
+    document.getElementById("agent-avail").textContent = avail.length;
+    document.getElementById("agent-today-count").textContent = todaySold.length;
+    document.getElementById("adm-today-sales").textContent = todaySold.length;
+    document.getElementById("adm-today-rev").textContent = `$${todayRev.toFixed(2)}`;
+    document.getElementById("adm-avail-stock").textContent = avail.length;
+
+    const planMap = {};
+    vouchers.forEach(v => {
+      const key = `${v.plan}|${v.price}`;
+      if (!planMap[key]) planMap[key] = { plan: v.plan, price: v.price, avail: 0 };
+      if (v.status === "available") planMap[key].avail++;
+    });
+
+    const keys = Object.keys(planMap);
+    if (!selectedPlanKey || !planMap[selectedPlanKey]) {
+      selectedPlanKey = keys[0] || null;
+    }
+
+    document.getElementById("plan-buttons").innerHTML = keys.length
+      ? keys.map(k => {
+          const p = planMap[k];
+          const active = k === selectedPlanKey ? "active" : "";
+          return `
+            <button class="plan-btn ${active}" onclick="selectedPlanKey='${k}'; render();">
+              <span class="p-name">${p.plan} — $${Number(p.price).toFixed(2)}</span>
+              <span class="p-meta">${p.avail} available</span>
+            </button>
+          `;
+        }).join("")
+      : `<div style="color:#64748b; font-size:0.9rem;">No packages found yet. Upload MikroTik vouchers in Owner Dashboard.</div>`;
+
+    const sel = document.getElementById("edit-batch-select");
+    if (sel) {
+      sel.innerHTML = keys.length
+        ? keys.map(k => {
+            const p = planMap[k];
+            return `<option value="${k}">${p.plan} ($${Number(p.price).toFixed(2)}) — ${p.avail} unsold</option>`;
+          }).join("")
+        : `<option value="">No batches available</option>`;
+    }
+
+    const byAgent = {};
+    todaySold.forEach(v => {
+      const name = v.sold_by || "Agent";
+      if (!byAgent[name]) byAgent[name] = { count: 0, rev: 0 };
+      byAgent[name].count++;
+      byAgent[name].rev += Number(v.price || 0);
+    });
+
+    document.getElementById("agent-summary-table").innerHTML = Object.keys(byAgent).length
+      ? Object.entries(byAgent).map(([agent, info]) => `
+          <tr>
+            <td><strong>${agent}</strong></td>
+            <td>${info.count}</td>
+            <td>$${info.rev.toFixed(2)}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="3" style="color:#64748b;">No sales yet today.</td></tr>`;
+
+    const q = (document.getElementById("search-query")?.value || "").trim().toLowerCase();
+    const filtered = q
+      ? vouchers.filter(v =>
+          (v.customer_name || "").toLowerCase().includes(q) ||
+          (v.code || "").toLowerCase().includes(q) ||
+          (v.sold_by || "").toLowerCase().includes(q) ||
+          (v.plan || "").toLowerCase().includes(q)
+        )
+      : vouchers.slice(0, 50);
+
+    document.getElementById("admin-table").innerHTML = filtered.length
+      ? filtered.slice(0, 60).map(v => `
+          <tr>
+            <td>${v.customer_name ? `<strong>${v.customer_name}</strong>` : '<span style="color:#94a3b8;">-</span>'}</td>
+            <td><strong>${v.code}</strong></td>
+            <td>${v.plan} ($${Number(v.price).toFixed(2)})</td>
+            <td><span class="badge ${v.status === 'available' ? 'badge-avail' : 'badge-sold'}">${v.status.toUpperCase()}</span></td>
+            <td>${v.status === 'sold' ? `${v.sold_by || 'Agent'} • ${new Date(v.sold_at).toLocaleString()}` : '-'}</td>
+            <td>${v.status === 'sold' ? `<button class="btn-outline btn-sm" onclick="reprintByCode('${v.code}')">Reprint</button>` : '-'}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="6" style="color:#64748b;">No matching records found.</td></tr>`;
+  }
+
+  refreshAll();
+  setInterval(refreshAll, 15000);
+</script>
+</body>
+</html>
